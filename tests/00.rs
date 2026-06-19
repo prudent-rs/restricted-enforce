@@ -18,6 +18,14 @@ fn f() {
 
     def_let!(ident_here);
     at_let!(ident_here) = 1;
+    {
+        def_let_direct!(ident_here);
+        if true {
+            at_let!(ident_here) = 1;
+        } else {
+            ident_here!() = 0;
+        }
+    }
 
     def_let!(ident_here @::dufo::dufo);
     at_let!(ident_here @::dufo::dufo) = true;
