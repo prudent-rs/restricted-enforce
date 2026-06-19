@@ -101,7 +101,6 @@ fn var_or_const_or_static_name(
 
     let span = given_name.span();
     let given_name = given_name.to_string();
-    let given_name = to_upper_lower_case(given_name, should_be_uppercase);
 
     let rnd_part = if should_be_uppercase {
         &*RND_PART_UPPERCASE
