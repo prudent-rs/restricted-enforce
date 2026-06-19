@@ -15,6 +15,10 @@ use syn::{Expr, Ident, Path, PathArguments, PathSegment, Type, punctuated::Punct
 
 mod file;
 
+/*pub mod prelude {
+    pub use crate::{def_let, def_let_direct, def_mut, def_mut_direct, def_const, def_const_direct, def_static, def_static_direct, at_let, at_mut, at_const, at_static};
+}*/
+
 /// Thanks to build.rs.
 const OUT_DIR: &str = env!("OUT_DIR");
 
@@ -56,6 +60,8 @@ fn to_upper_lower_case(mut s: String, should_be_uppercase: bool) -> String {
     s
 }
 
+// Compatible with Rust non-ASCII identifiers
+// (https://rust-lang.github.io/rfcs/2457-non-ascii-idents.html).
 fn var_or_const_or_static_name(
     macro_crate_and_path: Option<&Path>,
     given_name: &Ident,
@@ -121,18 +127,61 @@ fn var_or_const_or_static_name(
 
 #[proc_macro]
 pub fn def_let(input: ProcTokenStream) -> ProcTokenStream {
-    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::LET) {
+    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::LET, false) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_let_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::LET, true) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
 #[proc_macro]
 pub fn def_mut(input: ProcTokenStream) -> ProcTokenStream {
-    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::MUT) {
+    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::MUT, false) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
+#[proc_macro]
+pub fn def_mut_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ConstStaticLetMut::MUT, true) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_const(input: ProcTokenStream) -> ProcTokenStream {
+    match def_const_or_static_grammar(input.into(), ConstStaticLetMut::CONST, false) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_const_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_const_or_static_grammar(input.into(), ConstStaticLetMut::CONST, true) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_static(input: ProcTokenStream) -> ProcTokenStream {
+    match def_const_or_static_grammar(input.into(), ConstStaticLetMut::STATIC, false) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_static_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_const_or_static_grammar(input.into(), ConstStaticLetMut::STATIC, true) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+
 // @TODO consider names: handle, get
 #[proc_macro]
 pub fn at_let(input: ProcTokenStream) -> ProcTokenStream {
@@ -141,10 +190,23 @@ pub fn at_let(input: ProcTokenStream) -> ProcTokenStream {
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
-
 #[proc_macro]
 pub fn at_mut(input: ProcTokenStream) -> ProcTokenStream {
     match at_grammar(input.into(), ConstStaticLetMut::MUT) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn at_const(input: ProcTokenStream) -> ProcTokenStream {
+    match at_grammar(input.into(), ConstStaticLetMut::CONST) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn at_static(input: ProcTokenStream) -> ProcTokenStream {
+    match at_grammar(input.into(), ConstStaticLetMut::STATIC) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
@@ -211,40 +273,59 @@ pub fn use_const(input: ProcTokenStream) -> ProcTokenStream {
 //
 // - unless the macro developer designed it so (that is, any expressions in the input would be
 //   sub-scoped, like in a block {...}).
-fn def_let_or_mut_grammar(input: TokenStream, which: ConstStaticLetMut) -> MacroStreamResult {
+fn def_let_or_mut_grammar(
+    input: TokenStream,
+    which: ConstStaticLetMut,
+    direct: bool,
+) -> MacroStreamResult {
     assert!(which == ConstStaticLetMut::LET || which == ConstStaticLetMut::MUT);
     rules!(input => {
         ( $name:ident=$value:expr) => {
-            def_const_static_let_mut(which, &name, None, None, Some(&value))
+            def_const_static_let_mut(which, &name, None, None, Some(&value), direct)
         }
         ( $name:ident@$path:path=$value:expr ) => {
-            def_const_static_let_mut(which, &name, Some(&path), None, Some(&value))
+            def_const_static_let_mut(which, &name, Some(&path), None, Some(&value), direct)
         }
 
         ( $name:ident:$ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, None, Some(&ty), Some(&value))
+            def_const_static_let_mut(which, &name, None, Some(&ty), Some(&value), direct)
         }
         ( $name:ident@$path:path:$ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), Some(&value))
+            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), Some(&value), direct)
         }
 
         ( $name:ident ) => {
-            def_const_static_let_mut(which, &name, None, None, None)
+            def_const_static_let_mut(which, &name, None, None, None, direct)
         }
         ( $name:ident @ $path:path) => {
-            def_const_static_let_mut(which, &name, Some(&path), None, None)
+            def_const_static_let_mut(which, &name, Some(&path), None, None, direct)
         }
 
-        ( $name:ident:$ty:ty ) => {
-            def_const_static_let_mut(which, &name, None, Some(&ty), None)
+        ( $name:ident : $ty:ty ) => {
+            def_const_static_let_mut(which, &name, None, Some(&ty), None, direct)
         }
         ( $name:ident @$path:path :$ty:ty ) => {
-            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), None)
+            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), None, direct)
         }
     })
     .into()
 }
-
+fn def_const_or_static_grammar(
+    input: TokenStream,
+    which: ConstStaticLetMut,
+    direct: bool,
+) -> MacroStreamResult {
+    assert!(which == ConstStaticLetMut::CONST || which == ConstStaticLetMut::STATIC);
+    rules!(input => {
+        ( $name:ident:$ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &name, None, Some(&ty), Some(&value), direct)
+        }
+        ( $name:ident@$path:path:$ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), Some(&value), direct)
+        }
+    })
+    .into()
+}
 /*macro_rules! _path_then_colon {
     ($path:path)
 }*/
@@ -290,6 +371,7 @@ fn def_const_static_let_mut(
     path: Option<&Path>,
     ty: Option<&Type>,
     value: Option<&Expr>,
+    direct: bool,
 ) -> MacroStreamResult {
     assert!(!which.requires_type_and_value_and_should_be_uppercase() || ty.is_some());
     assert!(!which.requires_type_and_value_and_should_be_uppercase() || value.is_some());
@@ -321,8 +403,20 @@ fn def_const_static_let_mut(
     } else {
         TokenStream::new()
     };
+    let direct_part = if direct {
+        quote_spanned! {span=>
+            macro_rules! #name {
+                () => {
+                    #var_name
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
     Ok(quote_spanned! {span=>
         #const_static_let_mut_part #var_name #type_part #assign_part;
+        #direct_part
     })
 }
 
