@@ -1,11 +1,39 @@
 use private::*;
 //use private::prelude::*;
 
+// #[must_use]
 fn f() {
     #![allow(unused)]
-    // *local* lints don't apply
-    //
-    //#[allow(unused)]
+
+    #[deprecated]
+    macro_rules! unused {
+        () => {
+            let unused = ();
+        };
+    }
+    macro_rules! allowed_unused {
+        () => {
+            #[allow(unused)]
+            let unused = ();
+        };
+    }
+
+    {
+        #![deny(unused)]
+        let _ok_to_be_unused = ();
+
+        // fails to compile - OK:
+        //
+        //let x = ();
+
+        {
+            #![allow(unused)]
+            unused!();
+        }
+
+        // ok
+        allowed_unused!();
+    }
 
     def_let!(ident_here = true);
 
