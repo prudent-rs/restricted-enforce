@@ -15,6 +15,7 @@ use syn::{Expr, Ident, Path, Type};
 
 mod file;
 
+// @TODO
 /*pub mod prelude {
     pub use crate::{def_let, def_let_direct, def_mut, def_mut_direct, def_const, def_const_direct, def_static, def_static_direct, at_let, at_mut, at_const, at_static};
 }*/
@@ -171,8 +172,8 @@ pub fn def_static_direct(input: ProcTokenStream) -> ProcTokenStream {
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
+// --------------
 
-// @TODO consider names: handle, get
 #[proc_macro]
 pub fn at_let(input: ProcTokenStream) -> ProcTokenStream {
     match at_grammar(input.into(), ConstStaticLetMut::LET) {
@@ -201,47 +202,15 @@ pub fn at_static(input: ProcTokenStream) -> ProcTokenStream {
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
+// --------------
 
-/*
 #[proc_macro]
-pub fn def_mut(input: ProcTokenStream) -> ProcTokenStream {
-    match def_mut_impl(input.into()) {
+pub fn at_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match at_direct_grammar(input.into()) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
-
-#[proc_macro]
-pub fn def_const(input: ProcTokenStream) -> ProcTokenStream {
-    match def_const_impl(input.into()) {
-        Ok(output) => output.into(),
-        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
-    }
-}
-
-#[proc_macro]
-pub fn use_let(input: ProcTokenStream) -> ProcTokenStream {
-    match use_let_impl(input.into()) {
-        Ok(output) => output.into(),
-        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
-    }
-}
-
-#[proc_macro]
-pub fn use_mut(input: ProcTokenStream) -> ProcTokenStream {
-    match use_mut_impl(input.into()) {
-        Ok(output) => output.into(),
-        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
-    }
-}
-
-#[proc_macro]
-pub fn use_const(input: ProcTokenStream) -> ProcTokenStream {
-    match use_const_impl(input.into()) {
-        Ok(output) => output.into(),
-        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
-    }
-}*/
 // --------------
 
 // @TODO generate code that
@@ -270,32 +239,32 @@ fn def_let_or_mut_grammar(
 ) -> MacroStreamResult {
     assert!(which == ConstStaticLetMut::LET || which == ConstStaticLetMut::MUT);
     rules!(input => {
-        ( $name:ident = $value:expr) => {
-            def_const_static_let_mut(which, &name, None, None, Some(&value), direct)
+        ( $short_name:ident = $value:expr) => {
+            def_const_static_let_mut(which, &short_name, None, None, Some(&value), direct)
         }
-        ( $name:ident @$path:path = $value:expr ) => {
-            def_const_static_let_mut(which, &name, Some(&path), None, Some(&value), direct)
-        }
-
-        ( $name:ident: $ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, None, Some(&ty), Some(&value), direct)
-        }
-        ( $name:ident @$path:path :$ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), Some(&value), direct)
+        ( $short_name:ident @$path:path = $value:expr ) => {
+            def_const_static_let_mut(which, &short_name, Some(&path), None, Some(&value), direct)
         }
 
-        ( $name:ident ) => {
-            def_const_static_let_mut(which, &name, None, None, None, direct)
+        ( $short_name:ident: $ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &short_name, None, Some(&ty), Some(&value), direct)
         }
-        ( $name:ident @ $path:path) => {
-            def_const_static_let_mut(which, &name, Some(&path), None, None, direct)
+        ( $short_name:ident @$path:path :$ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &short_name, Some(&path), Some(&ty), Some(&value), direct)
         }
 
-        ( $name:ident : $ty:ty ) => {
-            def_const_static_let_mut(which, &name, None, Some(&ty), None, direct)
+        ( $short_name:ident ) => {
+            def_const_static_let_mut(which, &short_name, None, None, None, direct)
         }
-        ( $name:ident @$path:path :$ty:ty ) => {
-            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), None, direct)
+        ( $short_name:ident @ $path:path) => {
+            def_const_static_let_mut(which, &short_name, Some(&path), None, None, direct)
+        }
+
+        ( $short_name:ident : $ty:ty ) => {
+            def_const_static_let_mut(which, &short_name, None, Some(&ty), None, direct)
+        }
+        ( $short_name:ident @$path:path :$ty:ty ) => {
+            def_const_static_let_mut(which, &short_name, Some(&path), Some(&ty), None, direct)
         }
     })
     .into()
@@ -307,11 +276,11 @@ fn def_const_or_static_grammar(
 ) -> MacroStreamResult {
     assert!(which == ConstStaticLetMut::CONST || which == ConstStaticLetMut::STATIC);
     rules!(input => {
-        ( $name:ident:$ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, None, Some(&ty), Some(&value), direct)
+        ( $short_name:ident:$ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &short_name, None, Some(&ty), Some(&value), direct)
         }
-        ( $name:ident@$path:path:$ty:ty = $value:expr ) => {
-            def_const_static_let_mut(which, &name, Some(&path), Some(&ty), Some(&value), direct)
+        ( $short_name:ident@$path:path:$ty:ty = $value:expr ) => {
+            def_const_static_let_mut(which, &short_name, Some(&path), Some(&ty), Some(&value), direct)
         }
     })
     .into()
@@ -322,11 +291,24 @@ fn def_const_or_static_grammar(
 
 fn at_grammar(input: TokenStream, which: ConstStaticLetMut) -> MacroStreamResult {
     Ok(rules!(input => {
-        ( $name:ident) => {
-            at_impl(&name, None, which.requires_type_and_value_and_should_be_uppercase())
+        ( $short_name:ident) => {
+            at_impl(&short_name, None, which.requires_type_and_value_and_should_be_uppercase())
         }
-        ( $name:ident@$path:path) => {
-            at_impl(&name, Some(&path), which.requires_type_and_value_and_should_be_uppercase())
+        ( $short_name:ident@$path:path) => {
+            at_impl(&short_name, Some(&path), which.requires_type_and_value_and_should_be_uppercase())
+        }
+    })
+    .into())
+}
+
+fn at_direct_grammar(input: TokenStream) -> MacroStreamResult {
+    Ok(rules!(input => {
+        ( $short_name:ident, $full_name:ident, $tt:tt) => {
+            let span = tt.span();
+            // @TODO verify that full_name = short_name + tt.span
+            quote_spanned! {span=>
+                #full_name
+            }
         }
     })
     .into())
@@ -357,7 +339,7 @@ impl ConstStaticLetMut {
 
 fn def_const_static_let_mut(
     which: ConstStaticLetMut,
-    name: &Ident,
+    short_name: &Ident,
     path: Option<&Path>,
     ty: Option<&Type>,
     value: Option<&Expr>,
@@ -366,13 +348,13 @@ fn def_const_static_let_mut(
     assert!(!which.requires_type_and_value_and_should_be_uppercase() || ty.is_some());
     assert!(!which.requires_type_and_value_and_should_be_uppercase() || value.is_some());
 
-    let var_name = var_or_const_or_static_name(
+    let full_name = var_or_const_or_static_name(
         path,
-        name,
+        short_name,
         which.requires_type_and_value_and_should_be_uppercase(),
     );
 
-    let span = name.span();
+    let span = short_name.span();
 
     let const_static_let_mut_part = TokenStream::from_str(which.keywords())
         .map_err_to()
@@ -394,13 +376,15 @@ fn def_const_static_let_mut(
         TokenStream::new()
     };
     let direct_part = if direct {
-        let doc = format!("(private) {name} {type_part}");
+        let doc = format!("(private) {short_name} {type_part}");
+        // #[doc = #doc] works to generate tooltip/mouseover with rust-analyzer:
         quote_spanned! {span=>
-            // This works to generate tooltip/mouseover with rust-analyzer:
             #[doc = #doc]
-            macro_rules! #name {
-                () => {
-                    #var_name
+            macro_rules! #short_name {
+                // @TODO require an input/parameter ----> span check
+                ($tt:tt) => {
+                    ::private::at_direct!(#short_name, #full_name, $tt)
+                    //#full_name
                 }
             }
         }
@@ -408,15 +392,15 @@ fn def_const_static_let_mut(
         TokenStream::new()
     };
     Ok(quote_spanned! {span=>
-        #const_static_let_mut_part #var_name #type_part #assign_part;
+        #const_static_let_mut_part #full_name #type_part #assign_part;
         #direct_part
     })
 }
 
-fn at_impl(name: &Ident, path: Option<&Path>, should_be_uppercase: bool) -> TokenStream {
-    let var_name = var_or_const_or_static_name(path, name, should_be_uppercase);
-    let span = name.span();
+fn at_impl(short_name: &Ident, path: Option<&Path>, should_be_uppercase: bool) -> TokenStream {
+    let full_name = var_or_const_or_static_name(path, short_name, should_be_uppercase);
+    let span = short_name.span();
     quote_spanned! {span=>
-        #var_name
+        #full_name
     }
 }
