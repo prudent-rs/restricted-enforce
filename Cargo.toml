@@ -3,8 +3,8 @@ name = "private"
 version = "0.0.2"
 edition = "2024"
 
-# because of crate random_str
-rust-version = "1.85.0"
+# Requiring Rust 1.88 for https://doc.rust-lang.org/proc_macro/struct.Span.html#method.local_file.
+rust-version = "1.88.0"
 
 license = "BSD-2-Clause OR Apache-2.0 OR MIT"
 
@@ -30,10 +30,17 @@ unknown_lints = { level = "forbid"}
 [dependencies]
 proc-macro-rules = "0.4.0"
 proc-macro2 = {version="1.0.60", features=["span-locations"] }
+
 # for local development:
 #
 dis = { version = "0.0.3", path = "../dis", features = ["proc-macro2-diagnostics"]}
 #dis = { version = "0.0.3", features = ["proc-macro2-diagnostics"]}
+
+# for local development:
+#
+##mce-lib = {version="= 0.0.5", path="../mce-lib", features=["std"]}
+#
+mce-lib = {version="= 0.0.5"}
 
 quote = "1.0.26"
 
