@@ -69,8 +69,6 @@ struct LocalFilePath {
     make_uppercase: bool,
 }
 
-struct StrPathIdentSanitizer<'a> {}
-
 // Can't implement
 // - `impl From<&LocalFilePath> for Option<&str>`, or
 // - `impl Into<Option<&str>> for &LocalFilePath`
@@ -113,7 +111,7 @@ impl LocalFilePath {
     // Just a subset of
     // https://rust-lang.github.io/rfcs/2457-non-ascii-idents.html#reference-level-explanation
     // (which refers to https://www.unicode.org/reports/tr31/).
-    fn sanitize_as_ident(&self) -> Option<impl Iterator<Item = char>> {
+    fn sanitize_as_ident(&self) -> Option<String> {
         if let Some(path) = self.into_relativish_str() {
             let path = path.as_ref();
             let mut first_char = true;
@@ -135,7 +133,9 @@ impl LocalFilePath {
                     }
                 }
             });
-            Some(filtered)
+            let mut s = String::with_capacity(path.len());
+            s.extend(filtered);
+            Some(s)
         } else {
             None
         }
