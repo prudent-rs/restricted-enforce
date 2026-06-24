@@ -1,6 +1,20 @@
 use restricted::*;
 //use private::prelude::*;
 
+macro_rules! defi_consti {
+    ( $short_name:ident:$ty:ty = $value:expr ) => {
+        #[doc = "Happy DI"]
+        const $short_name: $ty = $value;
+    };
+}
+defi_consti!(DI : bool = false);
+const DDI: bool = DI;
+
+def_const!(B: bool = true);
+def_const_direct!(U: u8 = 1);
+
+//mod sub;
+
 // #[must_use]
 fn f() {
     #![allow(unused)]
@@ -35,27 +49,27 @@ fn f() {
         allowed_unused!();
     }
     {
-        def_const!(B: bool = true);
+        def_const!(B2: bool = true);
 
-        let _ = at_const!(B);
+        let _ = at_const!(B2);
 
         {
-            def_const_direct!(U: u8 = 1);
-            let _ = at_const!(U);
+            def_const_direct!(U2: u8 = 1);
+            let _ = at_const!(U2);
             //@TODO add token(s):
-            let _ = U!(.);
+            let _ = U2!(.);
         }
     }
     {
-        def_static!(B: bool = true);
+        def_static!(B3: bool = true);
 
-        let _ = at_static!(B);
+        let _ = at_static!(B3);
 
         {
-            def_static_direct!(U: u8 = 1);
-            let _ = at_static!(U);
+            def_static_direct!(U3: u8 = 1);
+            let _ = at_static!(U3);
             //@TODO add token(s):
-            let _ = U!(.);
+            let _ = U3!(.);
         }
     }
     /* */

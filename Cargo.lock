@@ -42,9 +42,7 @@ dependencies = [
 
 [[package]]
 name = "dis"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8ebe3c3ac202d27ec415480702d1f5222e7769e59f79c3a2feb3b5150dc2e99"
+version = "0.0.4"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",

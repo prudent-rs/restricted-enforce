@@ -8,7 +8,7 @@ use dis::{MacroDeepResult, MacroDiagnosticResult, MacroStreamResult};
 
 use proc_macro::TokenStream as ProcTokenStream;
 use proc_macro_rules::rules;
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::{Span, TokenStream, TokenTree};
 
 use quote::quote_spanned;
 use std::path::PathBuf;
@@ -18,6 +18,12 @@ use syn::{Expr, Ident, Type};
 
 mod file;
 
+#[cfg(rust_analyzer)]
+const _TODO: () = ();
+
+#[cfg(not(rust_analyzer))]
+const _TODO: () = ();
+
 // @TODO
 /*pub mod prelude {
     pub use crate::{def_let, def_let_direct, def_mut, def_mut_direct, def_const, def_const_direct, def_static, def_static_direct, at_let, at_mut, at_const, at_static};
@@ -26,7 +32,6 @@ mod file;
 /// Thanks to build.rs.
 const OUT_DIR: &str = env!("OUT_DIR");
 
-// Having an underscore in the literals/values, to make them more reasable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IdentNameConvention {
     LowerCase,
@@ -272,7 +277,7 @@ impl LocalFilePath {
                 self.local_path.to_string_lossy()
             )
             .into_dis()
-            .as_macro_deep_diagnostic())
+            .dis_as_macro_deep_diagnostic())
         };
     }
     /*let len = s.len().min(out_dir.len());
@@ -334,7 +339,7 @@ fn local_file_path(
             "Source file path unknown for code that invokes crate `restricted`. Span: {:?}",
             span
         )
-        .to_error_at(span))
+        .dis_to_error_at(span))
     }
 }
 
@@ -348,11 +353,14 @@ fn local_file_path(
 fn restricted_full_name(
     ident_short_name: &Ident,
     convention: IdentNameConvention,
+    //@TODO prefix_with_underscore: bool
 ) -> MacroDiagnosticResult<Ident> {
     let span = ident_short_name.span();
 
     let file_path = local_file_path(span, convention)?;
-    let ident_multi_part = file_path.sanitize_as_ident_multi_part().span_err(span)?;
+    let file_multi_part = file_path
+        .sanitize_as_ident_multi_part()
+        .dis_span_err(span)?;
 
     let restricted_part = restricted_part(convention);
 
@@ -363,7 +371,7 @@ fn restricted_full_name(
     // obvious/searchable.
 
     let full_name = format!(
-        "{ident_multi_part}{restricted_part}{ident_short_name}{underscore_if_used}{rnd_part}"
+        "{file_multi_part}{restricted_part}{ident_short_name}{underscore_if_used}{rnd_part}"
     );
 
     Ok(Ident::new(&full_name, span))
@@ -471,34 +479,59 @@ fn at_grammar(input: TokenStream, which: ItemChoice) -> MacroStreamResult {
 }
 
 fn at_direct_grammar(input: TokenStream) -> MacroStreamResult {
-    Ok(rules!(input => {
-        ( $short_name:ident, $full_name:ident, $tt:tt) => {
-            let span = tt.span();
-            // @TODO verify that full_name = short_name + tt.span
-            quote_spanned! {span=>
-                #full_name
-            }
+    rules!(input => {
+        ( $ident_short_name:ident, $ident_full_name:ident, $alleged_macro_provider_scope_tokens:tt, UpperCase) => {
+
+            at_direct_grammar_for_convention(ident_short_name, ident_full_name, alleged_macro_provider_scope_tokens, IdentNameConvention::UpperCase)
         }
     })
-    .into())
+}
+fn at_direct_grammar_for_convention(
+    ident_short_name: Ident,
+    alleged_ident_full_name: Ident,
+    alleged_macro_provider_scope_tokens: TokenTree,
+    convention: IdentNameConvention,
+) -> MacroStreamResult {
+    let alleged_macro_provider_span = alleged_macro_provider_scope_tokens.span();
+
+    // verify that full_name is compatible with tt.span = that tt.span is acceptable
+    {
+        let ident_full_name_based_on_actual_macro_provider_span =
+            restricted_full_name(&ident_short_name, convention)?;
+
+        if ident_full_name_based_on_actual_macro_provider_span != alleged_ident_full_name {
+            let alleged_macro_provider_span = alleged_macro_provider_scope_tokens.span();
+            return Err(format!(
+                "Identifier {ident_short_name} is not accessible in the given span \
+                         {alleged_macro_provider_span:?}."
+            )
+            .dis_to_error_at(alleged_macro_provider_span));
+        }
+    }
+
+    Ok(quote_spanned! {alleged_macro_provider_span=>
+        #alleged_ident_full_name
+    })
 }
 
 /// Access choice for a var/value. For now (and hopefully forever) we ignore `static mut`.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ItemChoice {
     Const,
-    Static,
-    Type,
     Fn,
+    Static,
+    Trait,
+    Type,
 }
 impl ItemChoice {
-    /// One of: `let`, `let mut`, `const`, `static`.
+    /// One of: `const`, `fn`, `static`, `trait`, `type`.
     pub fn keywords(&self) -> &'static str {
         match self {
             Self::Const => "const",
-            Self::Static => "static",
-            Self::Type => "type",
             Self::Fn => "fn",
+            Self::Static => "static",
+            Self::Trait => "trait",
+            Self::Type => "type",
         }
     }
     /*pub fn requires_type_and_value(&self) -> bool {
@@ -509,28 +542,29 @@ impl ItemChoice {
         match self {
             Self::Const | Self::Static => IdentNameConvention::UpperCase,
             Self::Fn => IdentNameConvention::LowerCase,
-            Self::Type => IdentNameConvention::CamelCase,
+            Self::Trait | Self::Type => IdentNameConvention::CamelCase,
         }
     }
 }
 
+/// param `direct`: whether to generate a direct accessor macro
 fn def_const_static(
     which: ItemChoice,
     ident_short_name: Ident,
     ty: Type,
     value: Expr,
-    direct: bool,
+    create_direct_accessor: bool,
 ) -> MacroStreamResult {
-    assert!(which == ItemChoice::Const || which == ItemChoice::Static);
+    assert!(matches!(which, ItemChoice::Const | ItemChoice::Static));
 
-    let full_name = restricted_full_name(&ident_short_name, which.convention())?;
+    let ident_full_name = restricted_full_name(&ident_short_name, which.convention())?;
 
     let span = ident_short_name.span();
 
-    let const_static_let_mut_part = TokenStream::from_str(which.keywords())
-        .map_err_to()
-        .map_macro_err()
-        .span_err(span)?;
+    let const_static_part = TokenStream::from_str(which.keywords())
+        .dis_map_err_to()
+        .dis_map_macro_err()
+        .dis_span_err(span)?;
 
     let type_part = quote_spanned! {span=>
         : #ty
@@ -538,16 +572,26 @@ fn def_const_static(
     let assign_part = quote_spanned! {span=>
         = #value
     };
-    let direct_part = if direct {
-        let doc = format!("(restricted) {ident_short_name} {type_part}");
+
+    let direct_part = if create_direct_accessor {
+        let doc = format!(
+            "(restricted) {} {ident_short_name} {type_part}",
+            match which {
+                ItemChoice::Const => "const",
+                ItemChoice::Static => "static",
+                _ => unreachable!(),
+            }
+        );
         // #[doc = #doc] works to generate tooltip/mouseover with rust-analyzer:
         quote_spanned! {span=>
+
             #[doc = #doc]
+            #[doc(hidden)]
             macro_rules! #ident_short_name {
-                // @TODO require an input/parameter ----> span check
-                ($tt:tt) => {
-                    ::restricted::at_direct!(#ident_short_name, #full_name, $tt)
-                    //#full_name
+
+                ($macro_provider_scope_tokens:tt) => {
+
+                    ::restricted::at_direct!(#ident_short_name, #ident_full_name, $macro_provider_scope_tokens, UpperCase)
                 }
             }
         }
@@ -555,7 +599,8 @@ fn def_const_static(
         TokenStream::new()
     };
     Ok(quote_spanned! {span=>
-        #const_static_let_mut_part #full_name #type_part #assign_part;
+        #const_static_part #ident_full_name #type_part #assign_part;
+
         #direct_part
     })
 }
