@@ -246,7 +246,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "restricted"
+name = "restricted-enforce"
 version = "0.0.1"
 dependencies = [
  "dis",

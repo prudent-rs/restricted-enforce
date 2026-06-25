@@ -10,29 +10,13 @@ use proc_macro::TokenStream as ProcTokenStream;
 use proc_macro_rules::rules;
 use proc_macro2::{Span, TokenStream, TokenTree};
 
-use quote::quote_spanned;
+use quote::{quote, quote_spanned};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use syn::{Expr, Ident, Type};
 
 mod file;
-
-#[cfg(rust_analyzer)]
-const _TODO: () = ();
-//@TODO:
-/*
-#[cfg(rust_analyzer)]
-use no_link as _;
-*/
-
-#[cfg(not(rust_analyzer))]
-const _TODO: () = ();
-
-// @TODO
-/*pub mod prelude {
-    pub use crate::{def_let, def_let_direct, def_mut, def_mut_direct, def_const, def_const_direct, def_static, def_static_direct, at_let, at_mut, at_const, at_static};
-}*/
 
 /// Thanks to build.rs.
 const OUT_DIR: &str = env!("OUT_DIR");
@@ -618,4 +602,18 @@ fn at_impl(ident_short_name: &Ident, convention: IdentNameConvention) -> MacroSt
     Ok(quote_spanned! {span=>
         #full_name
     })
+}
+
+#[doc(hidden)]
+#[proc_macro]
+pub fn version(input: ProcTokenStream) -> ProcTokenStream {
+    rules!(input.into() => {
+        () => {
+            const VERSION: &str = env!("CARGO_PKG_VERSION");
+            quote! {
+                #VERSION
+            }
+        }
+    })
+    .into()
 }
