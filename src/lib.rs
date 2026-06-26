@@ -94,6 +94,16 @@ impl IdentNameConvention {
             }
         }
     }
+
+    /// Token that indicates this convention, as expected by [at_direct].
+    fn macro_input_token(&self, span: Span) -> Ident {
+        let ident = match *self {
+            Self::LowerCase => "lower_case",
+            Self::UpperCase => "UPPER_CASE",
+            Self::CamelCase => "CamelCase",
+        };
+        Ident::new(ident, span)
+    }
 }
 
 static OUT_DIR_LOWER_CASE: LazyLock<String> = LazyLock::new(|| {
@@ -365,6 +375,7 @@ fn restricted_full_name(
 
     Ok(Ident::new(&full_name, span))
 }
+// --------------
 
 #[proc_macro]
 pub fn def_const(input: ProcTokenStream) -> ProcTokenStream {
@@ -390,6 +401,36 @@ pub fn def_static(input: ProcTokenStream) -> ProcTokenStream {
 #[proc_macro]
 pub fn def_static_direct(input: ProcTokenStream) -> ProcTokenStream {
     match def_const_or_static_grammar(input.into(), ItemChoice::Static, true) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+// --------------
+
+#[proc_macro]
+pub fn def_let(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ItemChoice::Let, false) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_let_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ItemChoice::Let, true) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_mut(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ItemChoice::Mut, false) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
+#[proc_macro]
+pub fn def_mut_direct(input: ProcTokenStream) -> ProcTokenStream {
+    match def_let_or_mut_grammar(input.into(), ItemChoice::Mut, true) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
@@ -423,25 +464,6 @@ pub fn at_direct(input: ProcTokenStream) -> ProcTokenStream {
 }
 // --------------
 
-// @TODO generate code that
-// 1. defines the let/mut/const
-// 2. defines local (non-exported) macro_rules! local-variable-name-here
-//    - BUT: if we do define (even just local) macro_rules! local-variable-name-here, then
-//      - we definitely need to include $crate, to avoid conflicts; and
-//      - worse: that consumer macro CANNOT be called multiple times in the same scope (conflicting
-//        macro_rules!)
-//      - without local macro_rules, that crate's macro(s) CAN be invoked multiple times in the same
-//        scope, and any variables are shadowed.
-//
-// BUT: where/how do we include that consumer macro's $crate path? -> it would be HERE
-//
-//
-// Either way: NOT for "re-entrant" macros. So we DON'T support macros usable like, or used like:
-//
-// custom_macro!( some-input-here... custom_macro!(...) ... )
-//
-// - unless the macro developer designed it so (that is, any expressions in the input would be
-//   sub-scoped, like in a block {...}).
 fn def_const_or_static_grammar(
     input: TokenStream,
     which: ItemChoice,
@@ -450,7 +472,30 @@ fn def_const_or_static_grammar(
     assert!(which == ItemChoice::Const || which == ItemChoice::Static);
     rules!(input => {
         ( $short_name:ident : $ty:ty = $value:expr ) => {
-            def_const_static(which, short_name, ty, value, create_direct_accessor)
+            def_const_or_static_or_let_or_mut(which, short_name, Some(ty), Some(value), create_direct_accessor)
+        }
+    })
+    .into()
+}
+
+fn def_let_or_mut_grammar(
+    input: TokenStream,
+    which: ItemChoice,
+    create_direct_accessor: bool,
+) -> MacroStreamResult {
+    assert!(which == ItemChoice::Const || which == ItemChoice::Static);
+    rules!(input => {
+        ( $short_name:ident = $value:expr ) => {
+            def_const_or_static_or_let_or_mut(which, short_name, None, Some(value), create_direct_accessor)
+        }
+        ( $short_name:ident : $ty:ty = $value:expr ) => {
+            def_const_or_static_or_let_or_mut(which, short_name, Some(ty), Some(value), create_direct_accessor)
+        }
+        ( $short_name:ident : $ty:ty) => {
+            def_const_or_static_or_let_or_mut(which, short_name, Some(ty), None, create_direct_accessor)
+        }
+        ( $short_name:ident ) => {
+            def_const_or_static_or_let_or_mut(which, short_name, None, None, create_direct_accessor)
         }
     })
     .into()
@@ -552,9 +597,16 @@ impl ItemChoice {
             Self::Use => "pub(crate) use",
         }
     }
-    /*pub fn requires_type_and_value(&self) -> bool {
-        self == &Self::Const || self == &Self::Static
-    }*/
+    /// Defined only for [`ItemChoice::Const`], [`ItemChoice::Let`], [`ItemChoice::Mut`] and
+    /// [`ItemChoice::Static`].
+    pub fn requires_type_and_value(&self) -> bool {
+        assert!(matches!(
+            self,
+            &Self::Const | &Self::Let | &Self::Mut | &Self::Static
+        ));
+        matches!(self, &Self::Const | &Self::Static)
+        //self == &Self::Const || self == &Self::Static
+    }
 
     /// Returning [Some] means to use that [IdentNameConvention]. But, returning [None] means that
     /// the [IdentNameConvention] depends on how this [ItemChoice] is used.
@@ -567,17 +619,22 @@ impl ItemChoice {
     }
 }
 
-/// param `direct`: whether to generate a direct accessor macro
-fn def_const_static(
+fn def_const_or_static_or_let_or_mut(
     which: ItemChoice,
     ident_short_name: Ident,
-    ty: Type,
-    value: Expr,
+    ty: Option<Type>,
+    value: Option<Expr>,
     create_direct_accessor: bool,
 ) -> MacroStreamResult {
-    assert!(matches!(which, ItemChoice::Const | ItemChoice::Static));
+    assert!(matches!(
+        which,
+        ItemChoice::Const | ItemChoice::Let | ItemChoice::Mut | ItemChoice::Static
+    ));
 
-    let ident_full_name = restricted_full_name(&ident_short_name, which.convention().unwrap())?;
+    assert!(!which.requires_type_and_value() || ty.is_some() && value.is_some());
+
+    let convention = which.convention().unwrap();
+    let ident_full_name = restricted_full_name(&ident_short_name, convention)?;
 
     let span = ident_short_name.span();
 
@@ -586,22 +643,31 @@ fn def_const_static(
         .dis_map_macro_err()
         .dis_span_err(span)?;
 
-    let type_part = quote_spanned! {span=>
-        : #ty
+    let type_part = if let Some(ty) = ty {
+        quote_spanned! {span=>
+            : #ty
+        }
+    } else {
+        TokenStream::new()
     };
-    let assign_part = quote_spanned! {span=>
-        = #value
+    let value_part = if let Some(value) = value {
+        quote_spanned! {span=>
+            = #value
+        }
+    } else {
+        TokenStream::new()
     };
 
+    let doc = format!(
+        "(restricted) {} {ident_short_name}",
+        match which {
+            ItemChoice::Const => "const",
+            ItemChoice::Static => "static",
+            _ => unreachable!(),
+        }
+    );
+    let convention_token = convention.macro_input_token(span);
     let direct_part = if create_direct_accessor {
-        let doc = format!(
-            "(restricted) {} {ident_short_name} {type_part}",
-            match which {
-                ItemChoice::Const => "const",
-                ItemChoice::Static => "static",
-                _ => unreachable!(),
-            }
-        );
         // #[doc = #doc] works to generate tooltip/mouseover with rust-analyzer:
         quote_spanned! {span=>
 
@@ -611,15 +677,17 @@ fn def_const_static(
 
                 ($macro_provider_scope_tokens:tt) => {
 
-                    ::restricted_enforce::at_direct!(#ident_short_name, #ident_full_name, $macro_provider_scope_tokens, UPPER_CASE)
+                    ::restricted_enforce::at_direct!(#ident_short_name, #ident_full_name, $macro_provider_scope_tokens, #convention_token)
                 }
             }
         }
     } else {
         TokenStream::new()
     };
+
     Ok(quote_spanned! {span=>
-        #const_static_part #ident_full_name #type_part #assign_part;
+        #[doc = #doc]
+        #const_static_part #ident_full_name #type_part #value_part;
 
         #direct_part
     })
