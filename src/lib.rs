@@ -489,6 +489,15 @@ pub fn at_use(input: ProcTokenStream) -> ProcTokenStream {
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
+
+/// Primarily for `trait`, where [at_use] and "direct" macros are unusable.
+#[proc_macro]
+pub fn use_with(input: ProcTokenStream) -> ProcTokenStream {
+    match use_with_grammar(input.into()) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
 // --------------
 
 /// Internal - not for direct use. For `const`, `let`, `let mut` and `static` only.
@@ -597,15 +606,35 @@ fn at_use_grammar(input: TokenStream) -> MacroStreamResult {
     rules!(input => {
         ( $ident_short_name:ident, CamelCase) => {
 
-            at_impl(&ident_short_name, IdentNameConvention::CamelCase)
+            at_use_impl(&ident_short_name, IdentNameConvention::CamelCase)
         }
         ( $ident_short_name:ident, UPPER_CASE) => {
 
-            at_impl(&ident_short_name, IdentNameConvention::UpperCase)
+            at_use_impl(&ident_short_name, IdentNameConvention::UpperCase)
         }
         ( $ident_short_name:ident, lower_case) => {
 
-            at_impl(&ident_short_name, IdentNameConvention::LowerCase)
+            at_use_impl(&ident_short_name, IdentNameConvention::LowerCase)
+        }
+    })
+}
+
+fn use_with_grammar(input: TokenStream) -> MacroStreamResult {
+    rules!(input => {
+        ( $ident_short_name:ident, CamelCase, $accessor_module:ident, $( $items: tt )*
+        ) => {
+
+            use_with_impl(&ident_short_name, IdentNameConvention::CamelCase, &accessor_module, items)
+        }
+        ( $ident_short_name:ident, UPPER_CASE, $accessor_module:ident, $( $items: tt )*
+        ) => {
+
+            use_with_impl(&ident_short_name, IdentNameConvention::UpperCase, &accessor_module, items)
+        }
+        ( $ident_short_name:ident, lower_case, $accessor_module:ident, $( $items: tt )*
+        ) => {
+
+            use_with_impl(&ident_short_name, IdentNameConvention::LowerCase, &accessor_module, items)
         }
     })
 }
@@ -703,7 +732,7 @@ fn use_direct_grammar_for_convention(
         name_convention,
     )?;
 
-    let outer_mod = use_outer_mod(&ident_short_name);
+    let outer_mod = use_outer_mod_name(&ident_short_name);
 
     Ok(quote_spanned! {alleged_macro_provider_span=>
         #outer_mod::#alleged_ident_full_name
@@ -827,7 +856,7 @@ fn def_const_or_static_or_let_or_mut(
     })
 }
 
-fn use_outer_mod(ident_short_name: &Ident) -> Ident {
+fn use_outer_mod_name(ident_short_name: &Ident) -> Ident {
     let span = ident_short_name.span();
     // Based on
     // https://github.com/search?q=%2F%5B%5Ea-zA-Z_%5Dmod+%2Brestricted_outer_%5Ba-zA-Z_0-9%5D%2B%2F+language%3ARust&type=code
@@ -851,7 +880,7 @@ fn def_use_impl(
     let ident_full_name = restricted_full_name(&ident_short_name, name_convention)?;
 
     let span = ident_short_name.span();
-    let outer_mod = use_outer_mod(&ident_short_name);
+    let outer_mod = use_outer_mod_name(&ident_short_name);
 
     let doc = format!("(restricted) {ident_short_name}");
 
@@ -895,6 +924,7 @@ fn def_use_impl(
 
 fn at_impl(ident_short_name: &Ident, name_convention: IdentNameConvention) -> MacroStreamResult {
     let full_name = restricted_full_name(ident_short_name, name_convention)?;
+
     let span = ident_short_name.span();
     Ok(quote_spanned! {span=>
         #full_name
@@ -905,15 +935,38 @@ fn at_use_impl(
     ident_short_name: &Ident,
     name_convention: IdentNameConvention,
 ) -> MacroStreamResult {
-    let full_name = restricted_full_name(ident_short_name, name_convention)?;
     let span = ident_short_name.span();
 
-    let outer_mod = use_outer_mod(&ident_short_name);
+    let outer_mod = use_outer_mod_name(&ident_short_name);
+    let full_name = restricted_full_name(ident_short_name, name_convention)?;
 
     Ok(quote_spanned! {span=>
         #outer_mod::#full_name
     })
 }
+
+fn use_with_impl(
+    ident_short_name: &Ident,
+    name_convention: IdentNameConvention,
+    accessor_module: &Ident,
+    items: Vec<TokenTree>,
+) -> MacroStreamResult {
+    let span = ident_short_name.span();
+
+    let outer_mod = use_outer_mod_name(&ident_short_name);
+    let full_name = restricted_full_name(ident_short_name, name_convention)?;
+
+    Ok(quote_spanned! {span=>
+        mod #accessor_module {
+            // intentionally _not_ `pub use`
+            use super::#outer_mod::#full_name as #ident_short_name;
+
+            #( #items )*
+        }
+        use #accessor_module::*;
+    })
+}
+
 //------------
 
 #[doc(hidden)]
