@@ -481,6 +481,14 @@ pub fn at_static(input: ProcTokenStream) -> ProcTokenStream {
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
+
+#[proc_macro]
+pub fn at_use(input: ProcTokenStream) -> ProcTokenStream {
+    match at_use_grammar(input.into()) {
+        Ok(output) => output.into(),
+        Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
+    }
+}
 // --------------
 
 /// Internal - not for direct use. For `const`, `let`, `let mut` and `static` only.
@@ -579,21 +587,25 @@ fn at_grammar_item_with_only_one_convention(
     which: ItemChoice,
 ) -> MacroStreamResult {
     rules!(input => {
-        ( $short_name:ident) => {
-            at_impl(&short_name, which.name_convention().unwrap())
+        ( $ident_short_name:ident) => {
+            at_impl(&ident_short_name, which.name_convention().unwrap())
         }
     })
 }
 
-fn at_grammar_item_with_varying_convention(
-    input: TokenStream,
-    which: ItemChoice,
-    name_convention: IdentNameConvention,
-) -> MacroStreamResult {
-    assert!(which.name_convention().is_none());
+fn at_use_grammar(input: TokenStream) -> MacroStreamResult {
     rules!(input => {
-        ( $short_name:ident) => {
-            at_impl(&short_name, name_convention)
+        ( $ident_short_name:ident, CamelCase) => {
+
+            at_impl(&ident_short_name, IdentNameConvention::CamelCase)
+        }
+        ( $ident_short_name:ident, UPPER_CASE) => {
+
+            at_impl(&ident_short_name, IdentNameConvention::UpperCase)
+        }
+        ( $ident_short_name:ident, lower_case) => {
+
+            at_impl(&ident_short_name, IdentNameConvention::LowerCase)
         }
     })
 }
@@ -692,6 +704,7 @@ fn use_direct_grammar_for_convention(
     )?;
 
     let outer_mod = use_outer_mod(&ident_short_name);
+
     Ok(quote_spanned! {alleged_macro_provider_span=>
         #outer_mod::#alleged_ident_full_name
     })
@@ -878,6 +891,7 @@ fn def_use_impl(
         #direct_part
     })
 }
+//------------
 
 fn at_impl(ident_short_name: &Ident, name_convention: IdentNameConvention) -> MacroStreamResult {
     let full_name = restricted_full_name(ident_short_name, name_convention)?;
@@ -886,6 +900,21 @@ fn at_impl(ident_short_name: &Ident, name_convention: IdentNameConvention) -> Ma
         #full_name
     })
 }
+
+fn at_use_impl(
+    ident_short_name: &Ident,
+    name_convention: IdentNameConvention,
+) -> MacroStreamResult {
+    let full_name = restricted_full_name(ident_short_name, name_convention)?;
+    let span = ident_short_name.span();
+
+    let outer_mod = use_outer_mod(&ident_short_name);
+
+    Ok(quote_spanned! {span=>
+        #outer_mod::#full_name
+    })
+}
+//------------
 
 #[doc(hidden)]
 #[proc_macro]
