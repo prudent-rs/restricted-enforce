@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+use core::convert::TryFrom;
 use dis::ext::core::ContentIntoDisplayExt;
 use dis::prelude_ext::{alloc::*, proc_macro2_diagnostics::*};
 use dis::{MacroDeepResult, MacroDiagnosticResult, MacroStreamResult};
@@ -23,9 +24,9 @@ const OUT_DIR: &str = env!("OUT_DIR");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IdentNameConvention {
+    CamelCase,
     LowerCase,
     UpperCase,
-    CamelCase,
 }
 impl IdentNameConvention {
     const fn uses_underscore(&self) -> bool {
@@ -103,6 +104,60 @@ impl IdentNameConvention {
             Self::CamelCase => "CamelCase",
         };
         Ident::new(ident, span)
+    }
+}
+impl TryFrom<&str> for IdentNameConvention {
+    type Error = String;
+
+    fn try_from(id: &str) -> Result<Self, Self::Error> {
+        // 0-based indexes to three bools, one per: CamelCase, LowerCase, UpperCase
+        const CAMEL: usize = 0;
+        const LOWER: usize = 1;
+        const UPPER: usize = 2;
+        let mut can_be = [true, true, true];
+
+        let how_many_true =
+            |can_be: &[bool]| -> usize { can_be.iter().map(|b| if *b { 1 } else { 0 }).sum() };
+
+        let mut first_char = true;
+        let mut first_letter = true;
+        for c in id.chars() {
+            if c == '_' {
+                if !first_char {
+                    // We don't specially cater for ID starting with __
+                    can_be[CAMEL] = false;
+                }
+                first_char = false;
+                continue;
+            }
+            if c.is_alphabetic() {
+                if c.is_lowercase() && !c.is_uppercase() {
+                    if first_letter {
+                        can_be[CAMEL] = false;
+                    }
+                    can_be[UPPER] = false;
+                } else if c.is_uppercase() && !c.is_lowercase() {
+                    can_be[LOWER] = false;
+                }
+                first_letter = false;
+            }
+        }
+        if how_many_true(&can_be) == 1 {
+            Ok(if can_be[CAMEL] {
+                assert!(!can_be[LOWER] && !can_be[UPPER]);
+                IdentNameConvention::CamelCase
+            } else if can_be[LOWER] {
+                assert!(!can_be[CAMEL] && !can_be[UPPER]);
+                IdentNameConvention::LowerCase
+            } else if can_be[UPPER] {
+                assert!(!can_be[CAMEL] && !can_be[LOWER]);
+                IdentNameConvention::UpperCase
+            } else {
+                unreachable!()
+            })
+        } else {
+            Err("Naming convention couldn't be detected.".to_owned())
+        }
     }
 }
 
@@ -747,7 +802,6 @@ enum ItemChoice {
     Let,
     Mut,
     Static,
-    Use,
 }
 impl ItemChoice {
     /// One of: `const`, `fn`, `static`, `trait`, `type`.
@@ -757,7 +811,6 @@ impl ItemChoice {
             Self::Let => "let",
             Self::Mut => "let mut",
             Self::Static => "static",
-            Self::Use => "pub(crate) use",
         }
     }
     /// Defined only for [`ItemChoice::Const`], [`ItemChoice::Let`], [`ItemChoice::Mut`] and
@@ -773,11 +826,12 @@ impl ItemChoice {
 
     /// Returning [Some] means to use that [IdentNameConvention]. But, returning [None] means that
     /// the [IdentNameConvention] depends on how this [ItemChoice] is used.
+    // @TODO if we don't need ItemItemChoice::Use, then remove Option<> here and just return
+    // IdentNameConvention
     pub fn name_convention(&self) -> Option<IdentNameConvention> {
         match self {
             Self::Const | Self::Static => Some(IdentNameConvention::UpperCase),
             Self::Let | Self::Mut => Some(IdentNameConvention::LowerCase),
-            Self::Use => None,
         }
     }
 }
