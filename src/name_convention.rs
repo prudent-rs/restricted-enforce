@@ -182,28 +182,51 @@ mod test_parsing {
     #[test]
     fn ok_camel() {
         assert_eq!(
-            TryFrom::try_from("GoodStruct"),
+            TryFrom::try_from("CamelCase"),
             Ok(IdentNameConvention::CamelCase)
         );
     }
     #[test]
     fn ok_camel_leading_underscore() {
         assert_eq!(
-            TryFrom::try_from("_GoodStruct"),
+            TryFrom::try_from("_UnderScorePrefixedCamelCase"),
             Ok(IdentNameConvention::CamelCase)
         );
     }
     #[test]
     fn ok_camel_digits() {
         assert_eq!(
-            TryFrom::try_from("GoodStruct12"),
+            TryFrom::try_from("CamelCase12"),
             Ok(IdentNameConvention::CamelCase)
         );
     }
 
     #[test]
+    fn ok_lower() {
+        assert_eq!(
+            TryFrom::try_from("lower"),
+            Ok(IdentNameConvention::LowerCase)
+        );
+    }
+    #[test]
+    fn ok_lower_and_underscores() {
+        assert_eq!(
+            TryFrom::try_from("lower_case"),
+            Ok(IdentNameConvention::LowerCase)
+        );
+    }
+
+    #[test]
+    fn ok_upper_needs_underscores() {
+        assert_eq!(
+            TryFrom::try_from("UPPER_CASE"),
+            Ok(IdentNameConvention::UpperCase)
+        );
+    }
+
+    #[test]
     fn no_camel_first_letter_lowercase() {
-        for id in ["goodStruct", "_goodStruct"] {
+        for id in ["goodStruct", "_lowerCasePrefixedMixedCase"] {
             let result = IdentNameConvention::try_from(id);
             assert!(matches!(result, Err(_)));
             assert!(result.unwrap_err().contains(
@@ -214,7 +237,7 @@ mod test_parsing {
     }
     #[test]
     fn no_camel_underscore() {
-        let result = IdentNameConvention::try_from("Good_Struct");
+        let result = IdentNameConvention::try_from("MixedCaseWithUnderscore_");
         assert!(matches!(result, Err(_)));
         assert!(result.unwrap_err().contains(
             "both lowercase and uppercase, but \
@@ -222,34 +245,69 @@ mod test_parsing {
         ));
     }
     #[test]
-    fn no_camel_all_letters_uppercase() {
+    fn unsure_all_letters_uppercase_no_underscores() {
         let result = IdentNameConvention::try_from("GOOD");
         assert!(matches!(result, Err(_)));
         assert!(result.unwrap_err().contains("either UPPERCASE or Camel"));
     }
 
+    const NO_LOWERCASE_NO_UPPERCASE: &str = "doesn't contain either lowercase or uppercase";
+
     #[test]
-    fn no_lowercase_no_uppercase_underscore_and_numerical_only() {
-        const ERR_PART: &str = "doesn't contain either lowercase or uppercase";
+    fn no_lowercase_no_uppercase_and_underscore_and_optional_numerical() {
         let span = proc_macro2::Span::mixed_site();
 
         let _ = Ident::new("_1", span); // _1 **is** an acceptable ident
         assert!(
             IdentNameConvention::try_from("_1")
                 .unwrap_err()
-                .contains(ERR_PART)
+                .contains(NO_LOWERCASE_NO_UPPERCASE)
         );
 
         // _½ (U+00BD) is refused by Ident::new
-        //
+
         // ٢ is an Arabic-Indic digit (U+0662)
-        let _ = Ident::new("_٢", span); // _1 **is** an acceptable ident
+        let _ = Ident::new("_٢", span);
         assert!(
             IdentNameConvention::try_from("_٢")
                 .unwrap_err()
-                .contains(ERR_PART)
+                .contains(NO_LOWERCASE_NO_UPPERCASE)
         );
 
         // Roman numeral Ⅻ = U+216C __is__ an (uppercase) letter!
+
+        let _ = Ident::new("_", span);
+        assert!(
+            IdentNameConvention::try_from("_")
+                .unwrap_err()
+                .contains(NO_LOWERCASE_NO_UPPERCASE)
+        );
+    }
+
+    const AHLAN: &str = "أهلاً"; // "Hi" in Arabic
+
+    #[test]
+    fn unicameral_letters() {
+        let span = proc_macro2::Span::mixed_site();
+
+        let _ = Ident::new(AHLAN, span); // AHLAN **is** an acceptable ident
+        assert!(
+            IdentNameConvention::try_from(AHLAN)
+                .unwrap_err()
+                .contains(NO_LOWERCASE_NO_UPPERCASE)
+        );
+    }
+
+    #[test]
+    fn unicameral_letters_and_underscore() {
+        let span = proc_macro2::Span::mixed_site();
+
+        let id = format!("_{AHLAN}");
+        let _ = Ident::new(&id, span); // AHLAN **is** an acceptable ident
+        assert!(
+            IdentNameConvention::try_from(&id[..])
+                .unwrap_err()
+                .contains(NO_LOWERCASE_NO_UPPERCASE)
+        );
     }
 }
