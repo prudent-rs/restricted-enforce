@@ -294,30 +294,100 @@ fn restricted_full_name(
 }
 // --------------
 
+#[repr(transparent)]
+struct Labeled<const AUTO_LABEL: bool, V, L> {
+    value: V,
+    label: core::marker::PhantomData<L>,
+}
+impl<const AUTO_LABEL: bool, V, L> core::ops::Deref for Labeled<AUTO_LABEL, V, L> {
+    type Target = V;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+impl<const AUTO_LABEL: bool, V, L> Labeled<AUTO_LABEL, V, L> {
+    fn unlabel(self) -> V {
+        self.value
+    }
+}
+trait IntoLabeledAuto<V, L> {
+    fn into_labeled_auto(self) -> Labeled<true, V, L>;
+}
+impl<F, V, L> IntoLabeledAuto<V, L> for F
+where
+    F: Into<V>,
+{
+    fn into_labeled_auto(self) -> Labeled<true, V, L> {
+        let value: V = self.into();
+        Labeled {
+            value,
+            label: core::marker::PhantomData,
+        }
+    }
+}
+trait IntoLabeledSpecified<V> {
+    fn into_labeled_spec<L>(self) -> Labeled<false, V, L>;
+}
+impl<F, V> IntoLabeledSpecified<V> for F
+where
+    F: Into<V>,
+{
+    fn into_labeled_spec<L>(self) -> Labeled<false, V, L> {
+        let value: V = self.into();
+        Labeled {
+            value,
+            label: core::marker::PhantomData,
+        }
+    }
+}
+type LabeledAuto<V, L> = Labeled<true, V, L>;
+type LabeledSpecified<V, L> = Labeled<false, V, L>;
+
+type TokenStreamLabeled<L> = LabeledSpecified<TokenStream, L>;
+//type MacroStreamResultLabeled<L> = Labeled<MacroStreamResult, L>;
+// --------------
+
+struct DefConstStatic;
 #[proc_macro]
 pub fn def_const(input: ProcTokenStream) -> ProcTokenStream {
-    match def_const_or_static_grammar(input.into(), ItemChoice::Const, false) {
+    match def_const_or_static_grammar(
+        input.into_labeled_spec::<DefConstStatic>(),
+        ItemChoice::Const,
+        false,
+    ) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
 #[proc_macro]
 pub fn def_const_direct(input: ProcTokenStream) -> ProcTokenStream {
-    match def_const_or_static_grammar(input.into(), ItemChoice::Const, true) {
+    match def_const_or_static_grammar(
+        input.into_labeled_spec::<DefConstStatic>(),
+        ItemChoice::Const,
+        true,
+    ) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
 #[proc_macro]
 pub fn def_static(input: ProcTokenStream) -> ProcTokenStream {
-    match def_const_or_static_grammar(input.into(), ItemChoice::Static, false) {
+    match def_const_or_static_grammar(
+        input.into_labeled_spec::<DefConstStatic>(),
+        ItemChoice::Static,
+        false,
+    ) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
 }
 #[proc_macro]
 pub fn def_static_direct(input: ProcTokenStream) -> ProcTokenStream {
-    match def_const_or_static_grammar(input.into(), ItemChoice::Static, true) {
+    match def_const_or_static_grammar(
+        input.into_labeled_spec::<DefConstStatic>(),
+        ItemChoice::Static,
+        true,
+    ) {
         Ok(output) => output.into(),
         Err(diag) => panic!("{:?}", diag), //diag.emit_as_expr_tokens().into(),
     }
@@ -439,7 +509,7 @@ pub fn use_direct(input: ProcTokenStream) -> ProcTokenStream {
 // --------------
 
 fn def_const_or_static_grammar(
-    input: TokenStream,
+    input: LabeledSpecified<TokenStream, DefConstStatic>,
     which: ItemChoice,
     create_direct_accessor: bool,
 ) -> MacroStreamResult {
